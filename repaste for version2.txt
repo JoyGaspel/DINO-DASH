@@ -1,0 +1,385 @@
+import pygame
+import sys
+import random
+import json
+import os
+
+pygame.init()
+pygame.mixer.init()  # Initialize the mixer for music
+win = pygame.display.set_mode((1000, 700))  # Create the game window
+pygame.display.set_caption("Meteor Dash")  # Set the window title
+
+# Directs kung saan yung textures & leaderboards 
+assets_directory = os.path.join(os.path.dirname(__file__), "textures")
+leaderboard_file = os.path.join(assets_directory, "leaderboard.json")
+
+# Textures Loader - loads the an specific image/music when called this function
+def load_image(filename): #for image
+    return pygame.image.load(os.path.join(assets_directory, filename))
+def load_music(filename): #for musics
+    pygame.mixer.music.load(os.path.join(assets_directory, filename))
+
+# LEADERBOARDS CODE FUNCTIONS
+# Save and Load Leaderboard - Loading and saving player names in leaderboard
+def load_leaderboard():
+    if os.path.exists(leaderboard_file):
+        with open(leaderboard_file, 'r') as f:
+            return json.load(f)
+    else:
+        return []
+def save_leaderboard(leaderboard):
+    with open(leaderboard_file, 'w') as f:
+        json.dump(leaderboard, f)
+
+# Updating function - function to call to update leaderboard to check kung mayroon bagong highscore
+def update_leaderboard(player_name, score):
+    leaderboard = load_leaderboard()
+    
+    # Add new score and sort the leaderboard by score in descending order
+    leaderboard.append({"name": player_name, "score": score})
+    leaderboard = sorted(leaderboard, key=lambda x: x["score"], reverse=True)[:5]
+    
+    save_leaderboard(leaderboard)
+
+    # Check if the player achieved a high score
+    is_high_score = any(entry["name"] == player_name and entry["score"] == score for entry in leaderboard)
+    return is_high_score
+
+# Display Leaderboard
+def show_leaderboard(surface, font):
+    leaderboard = load_leaderboard()
+    surface.fill((255, 255, 255))  # Clear screen with white background
+
+    # Display title
+    title = font.render("Leaderboard", True, (0, 0, 0))
+    surface.blit(title, (400, 50))
+
+    # Display the top 5 scores
+    for i, entry in enumerate(leaderboard):
+        text = f"{i+1}. {entry['name']} - {entry['score']}"
+        entry_text = font.render(text, True, (0, 0, 0))
+        surface.blit(entry_text, (350, 150 + i * 50))
+
+    pygame.display.update()
+
+# Colors settings
+White = (255, 255, 255)
+Black = (0, 0, 0)
+Red = (255, 0, 0)
+
+clock = pygame.time.Clock()  # Allows us to change the fps of the game
+
+# Characters scale and position settings
+char_w, char_h = 100, 75
+char_x, char_y = 0, 550
+v = 5
+
+# Background
+bg_w, bg_h = 1000, 900
+bg_x, bg_y = 0, -260
+
+# Terrain 
+trn_w, trn_h = 1000, 700
+trn_x, trn_y = 0, 25
+
+# Start menu
+sm_w, sm_h = 1000, 700
+
+# Start menu text
+dt_x, dt_y = 270, 150
+dt_x2, dt_y2 = 400, 645
+dt_x3, dt_y3 = 355, 240
+
+# Game over text
+gt_x, gt_y = 150, 250
+gt_x2, gt_y2 = 400, 350
+gt_x3, gt_y3 = 200, 600
+leaderboard_x = 700 * 0.9
+leaderboard_y = 1000 * 0.2
+
+# Game variables
+gameover = False
+left = False
+right = False
+walkCount = 0
+score = 0
+
+# Dash Settings
+is_dashing = False
+dash_speed = 15
+dash_duration = 500  # This is in milliseconds
+dash_cooldown = 3000  # This is in milliseconds, so 3 seconds
+last_dash_time = 0
+dash_end_time = 0
+dash_direction = 1  # 1 for right, -1 for left
+
+# Invincibility Settings
+invincible = False
+invincibility_duration = 7000  # Invincibility duration in milliseconds (7 seconds)
+invincibility_cooldown = 25000  # Invincibility cooldown in milliseconds (25 seconds)
+invincibility_end_time = 0
+last_invincibility_time = 0  # Initialize last_invincibility_time
+
+# Background music
+load_music("bg music.mp3") # Load the music
+
+# Load sound effects
+dash_sound = pygame.mixer.Sound(os.path.join(assets_directory, "Dashsound.wav")) # Load dash sound effect
+invincibility_sound = pygame.mixer.Sound(os.path.join(assets_directory, "invincibilitysound.wav"))  # Load invincibility sound effect
+
+# Load images
+bg = load_image("Bg.png")
+bg = pygame.transform.scale(bg, (bg_w, bg_h))
+
+sm = load_image("startmenubg.png")
+sm = pygame.transform.scale(sm, (sm_w, sm_h))
+
+trn = load_image("terrain.png")
+trn = pygame.transform.scale(trn, (trn_w, trn_h - 25))
+
+# Animation
+walkRight = [load_image("1.png"), load_image("2.png"), load_image("3.png"),
+             load_image("4.png"), load_image("2.png"), load_image("1.png")]
+walkLeft = [load_image("1.1.png"), load_image("2.2.png"), load_image("3.3.png"),
+            load_image("4.4.png"), load_image("2.2.png"), load_image("1.1.png")]
+stand = load_image("standing (2).png")
+
+# Meteors
+falling_object = load_image("meteor.png")
+
+# Play music
+pygame.mixer.music.play(-1)
+
+# Font settings
+font = pygame.font.SysFont('04b_30', 90)
+font2 = pygame.font.SysFont('04b_30', 25)
+
+# Function to display text
+def draw_text(surface, text, position, font, color):
+    text_surface = font.render(text, True, color)
+    surface.blit(text_surface, position)
+
+# Start menu settings
+def start_menu():
+    global player_name
+    menu = True
+    player_name = ""     # PLAYER NAME VARIABLE
+    input_active = False  #UWU: Track if input box is active
+    name_box_rect = pygame.Rect(300, 430, 200, 40)  #UWU: Name input box area
+    check_button_rect = pygame.Rect(520, 430, 50, 40)  #UWU: Check button position
+
+    while menu:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if input_active and event.key == pygame.K_BACKSPACE:  #UWU: Allow backspace
+                    player_name = player_name[:-1]
+                elif input_active:
+                    player_name += event.unicode  #UWU: Add character to player name
+                if event.key == pygame.K_e and not input_active:
+                    menu = False
+
+            #UWU: Activate input box with right-click
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 3:  # Right-click
+                    if name_box_rect.collidepoint(event.pos):
+                        input_active = True  # Activate input box
+
+                #UWU: Save player name with check button
+                if check_button_rect.collidepoint(event.pos):
+                    input_active = False  # Deactivate input after checking
+                    print(f"Player name saved as: {player_name}")  # For debugging
+
+        # Draw menu elements
+        win.blit(sm, (0, 0))
+        draw_text(win, "Meteor", (dt_x, dt_y), font, Black)
+        draw_text(win, "Dash", (dt_x3, dt_y3), font, Black)
+        draw_text(win, "Press 'E' to Start", (dt_x2 - 80, dt_y2), font2, Black)
+        draw_text(win, "Enter Your Name:", (300, 400), font2, Black)
+
+        #UWU: Draw name input box
+        pygame.draw.rect(win, (255, 255, 255) if input_active else (200, 200, 200), name_box_rect, 0)
+        draw_text(win, player_name, (name_box_rect.x + 5, name_box_rect.y + 5), font2, Black)
+
+        #UWU: Draw check button
+        pygame.draw.rect(win, (0, 255, 0), check_button_rect)
+        draw_text(win, "Enter", (check_button_rect.x + 4, check_button_rect.y + 10), font2, Black)
+
+        pygame.display.update()
+
+# Function to redraw the game window
+def redrawGameWindow():
+    global walkCount, score, invincible  # Declare invincible as global
+    win.blit(bg, (bg_x, bg_y - 10))  # Draw background
+    win.blit(trn, (trn_x, trn_y))  # Draw terrain
+
+    # Character animation
+    if left:
+        win.blit(walkLeft[walkCount // 2], (char_x, char_y))
+    elif right:
+        win.blit(walkRight[walkCount // 2], (char_x, char_y))
+    else:
+        win.blit(stand, (char_x, char_y))
+
+    hitbox = (char_x + 25, char_y + 5, char_w - 50, char_h - 2)  # Hitbox
+
+    # Draw meteors and check for collisions
+    for meteor in meteors:
+        meteor.fall()
+        meteor.draw()
+        # Check if hit only if not invincible
+        if meteor.hit(char_x, char_y, char_w, char_h) and not invincible:
+            global gameover  # Declare gameover as global
+            gameover = True  # Set gameover to True
+            break  # Exit the loop once a hit is detected
+
+    if not gameover:
+        score += 1  # Increment score if the game is not over
+        draw_text(win, f"Score: {score}", (10, 10), font2, Black)
+
+    # Check if invincible and display remaining time
+    if invincible and pygame.time.get_ticks() < invincibility_end_time:
+        remaining = (invincibility_end_time - pygame.time.get_ticks()) // 1000
+        draw_text(win, f"Invincibility: {remaining}s", (10, 70), font2, Red)
+    else:
+        invincible = False  # Reset invincibility when time is up
+
+    walkCount += 1  # Increment walkCount for animation
+    if walkCount >= 12:  # Reset walkCount for animation
+        walkCount = 0
+
+    pygame.display.update()  # Update the display
+
+    # Dash cooldown indicator
+    if pygame.time.get_ticks() - last_dash_time < dash_cooldown:
+        remaining = (dash_cooldown - (pygame.time.get_ticks() - last_dash_time)) // 1000
+        draw_text(win, f"Dash Cooldown: {remaining}s", (10, 40), font2, Red)
+
+# Meteor settings
+class FallingObject():
+    def __init__(self):
+        self.x = random.randint(0, 1000 - 50)  # Random position 
+        self.y = -50  # Start above the screen
+        self.speed = random.randint(2, 3)  # Random falling speed
+
+    def fall(self):
+        self.y += self.speed  # Move the meteor down by speed
+        if self.y > 600:  
+            self.y = -50
+            self.x = random.randint(0, 1000 - 50)
+            self.speed = random.randint(2, 3)  # Speed of meteor
+
+    def draw(self):
+        win.blit(falling_object, (self.x, self.y))
+
+    def hit(self, player_x, player_y, player_w, player_h):
+        return (self.x < player_x + player_w and self.x + 50 > player_x and
+                self.y + 50 >= player_y and self.y <= player_y + player_h)
+
+# Create meteors
+meteors = [FallingObject() for i in range(15)]  # Customize the number of meteors
+
+# Game over settings
+# Initialize toggle for leaderboard visibility
+show_leaderboard = False
+
+def game_over_screen():
+    global gameover, char_x, score, show_leaderboard
+    
+    # Game over loop
+    while gameover:
+        win.fill(White)  # Clear the window
+        draw_text(win, "Game Over", (gt_x, gt_y), font, (255, 0, 0))
+        draw_text(win, f"Score: {score}", (gt_x2, gt_y2), font2, Black)
+        draw_text(win, "Press R to Retry or Q to Quit", (gt_x3, gt_y3), font2, Black)
+        draw_text(win, "Press L to Toggle Leaderboard", (gt_x3, gt_y3 + 40), font2, Black)  # Toggle message
+
+        # Display leaderboard if toggled on
+        if show_leaderboard:
+            leaderboard = load_leaderboard()
+            draw_text(win, "LEADERBOARDS :", (leaderboard_x - 100, leaderboard_y - 80 ), pygame.font.SysFont('04b_30', 50), Black)
+            for i, entry in enumerate(leaderboard):
+                entry_text = f"{i + 1}. {entry['name']} - {entry['score']}"
+                draw_text(win, entry_text, (leaderboard_x, leaderboard_y + 1 + i * 30), font2, Black)
+
+        # Event handling
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r:  # Retry game
+                    reset_game()
+                elif event.key == pygame.K_q:  # Quit game
+                    pygame.quit()
+                    sys.exit()
+                elif event.key == pygame.K_l:  # Toggle leaderboard visibility
+                    show_leaderboard = not show_leaderboard
+
+        pygame.display.update()  # Update the display
+
+# Reset game settings
+def reset_game():
+    global char_x, char_y, score, gameover, left, right, walkCount, is_dashing, last_dash_time, invincible
+    char_x, char_y = 0, 550  # Reset character position
+    score = 0  # Reset score
+    gameover = False  # Reset gameover state
+    left = False
+    right = False
+    walkCount = 0
+    is_dashing = False
+    last_dash_time = 0  # Reset dash time
+    invincible = False  # Reset invincibility
+
+# Start the game
+start_menu()  # Show start menu
+while True:
+    clock.tick(60)  # Frame rate
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            pygame.quit()
+            sys.exit()
+
+    keys = pygame.key.get_pressed()  # Get the state of keys
+
+    # Movement controls
+    if keys[pygame.K_LEFT] and char_x > v:
+        left = True
+        right = False
+        char_x -= v  # Move left
+    elif keys[pygame.K_RIGHT] and char_x < 1000 - char_w - v:
+        right = True
+        left = False
+        char_x += v  # Move right
+    else:
+        left = False
+        right = False
+
+    # Dash functionality
+    if keys[pygame.K_SPACE] and not is_dashing and (pygame.time.get_ticks() - last_dash_time > dash_cooldown):
+        is_dashing = True
+        dash_sound.play()  # Play dash sound
+        last_dash_time = pygame.time.get_ticks()
+        dash_direction = -1 if left else 1  # Set dash direction based on movement
+
+    if is_dashing:
+        if pygame.time.get_ticks() - last_dash_time < dash_duration:
+            char_x += dash_direction * dash_speed  # Update character position based on dash direction
+        else:
+            is_dashing = False  # Reset dashing state after the duration
+
+    # Invincibility functionality
+    if keys[pygame.K_i] and not invincible and (pygame.time.get_ticks() - last_invincibility_time > invincibility_cooldown):
+        invincible = True
+        invincibility_sound.play()  # Play invincibility sound
+        last_invincibility_time = pygame.time.get_ticks()
+        invincibility_end_time = last_invincibility_time + invincibility_duration  # Set end time
+
+    if invincible and pygame.time.get_ticks() > invincibility_end_time:
+        invincible = False  # Reset invincibility when time is up
+
+    redrawGameWindow()  # Redraw the game window
+    if gameover:
+        game_over_screen()  # Show game over screen
